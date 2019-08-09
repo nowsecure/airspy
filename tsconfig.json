@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "lib": ["esnext"],
+    "module": "commonjs",
+    "allowJs": true,
+    "strict": true,
+    "sourceMap": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "bin/**/*",
+    "lib/**/*"
+  ],
+  "exclude": [
+    "lib/agent/**/*"
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "name": "airspy",
+  "version": "1.0.0",
+  "description": "AirDrop protocol sniffer",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nowsecure/airspy.git"
+  },
+  "engines": {
+    "node": ">= 10.13"
+  },
+  "files": [
+    "/dist/"
+  ],
+  "bin": {
+    "airspy": "./dist/bin/airspy.js"
+  },
+  "scripts": {
+    "clean": "rimraf build",
+    "prepare": "npm run build-app && npm --prefix ./lib/agent install ./lib/agent",
+    "build": "npm run build-app && npm run build-agent",
+    "build-app": "tsc -p tsconfig.release.json",
+    "build-app:watch": "tsc -w -p tsconfig.release.json",
+    "build-agent": "npm --prefix ./lib/agent run build",
+    "build-agent:watch": "npm --prefix ./lib/agent run build:watch",
+    "lint": "tslint -t stylish --project \"tsconfig.json\""
+  },
+  "devDependencies": {
+    "@types/node": "^12.7.1",
+    "@types/plist": "^3.0.2",
+    "@types/pretty-hrtime": "^1.0.0",
+    "prettier": "^1.18.2",
+    "rimraf": "^2.6.3",
+    "tslint": "^5.18.0",
+    "tslint-config-prettier": "^1.18.0",
+    "tslint-microsoft-contrib": "^6.2.0",
+    "typescript": "^3.5.3"
+  },
+  "dependencies": {
+    "bplist-parser": "^0.2.0",
+    "chalk": "^2.4.2",
+    "commander": "^3.0.0",
+    "frida": "^12.6.13",
+    "plist": "^3.0.1",
+    "pretty-hrtime": "^1.0.3"
+  }
+}

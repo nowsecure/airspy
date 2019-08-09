@@ -1,0 +1,17 @@
+{
+  "name": "airspy-agent",
+  "version": "1.0.0",
+  "description": "AirDrop protocol sniffer agent",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "prepare": "npm run build",
+    "build": "frida-compile index.ts -o ../../dist/lib/agent.js",
+    "build:watch": "frida-compile index.ts -o ../../dist/lib/agent.js -w"
+  },
+  "devDependencies": {
+    "@types/frida-gum": "^13.1.0",
+    "@types/node": "^12.7.1",
+    "frida-compile": "^9.0.5"
+  }
+}
