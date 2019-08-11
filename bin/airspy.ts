@@ -10,6 +10,7 @@ import {
     IRequestHeadEvent,
     IResponseEvent,
     LogLevel,
+    RequestId,
     TargetDevice,
 } from "../lib";
 
@@ -134,6 +135,8 @@ class ConsoleUI implements IDelegate {
 
     private pendingOperation: IPendingOperation | null = null;
 
+    private requests: Map<RequestId, string> = new Map<RequestId, string>();
+
     private getOutputDirPromise: Promise<string> | null = null;
     private getEventOutputStreamPromise: Promise<Writable> | null = null;
 
@@ -218,6 +221,9 @@ class ConsoleUI implements IDelegate {
 
     private onRequestHead(event: IRequestHeadEvent): void {
         const { id, method, path, headers } = event;
+
+        const description = method.toLowerCase().replace(/[^\w]/g, "-") + path.toLowerCase().replace(/[^\w]/g, "-");
+        this.requests.set(id, description);
 
         this.printLines(inboundPrefix,
             [
@@ -381,7 +387,13 @@ class ConsoleUI implements IDelegate {
 
     private async withNewlyCreatedFileFor(event: AgentEvent, suffix: string, write: (stream: Writable) => void): Promise<void> {
         const id = event.id.toString().padStart(3, "0");
-        const description = event.type.replace(/[^\w]/g, "-");
+
+        let requestDescription = this.requests.get(event.id);
+        if (requestDescription === undefined) {
+            requestDescription = "unknown";
+        }
+        const eventDescription = event.type.replace(/[^\w]/g, "-");
+        const description = `${requestDescription}-${eventDescription}`;
 
         const path = await this.getOutputPath(`${id}-${description}${suffix}`);
 
