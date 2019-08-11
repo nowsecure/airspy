@@ -257,7 +257,7 @@ function expandOslogFormatStringX64(format: string, context: X64CpuContext): str
     let { r8 } = context;
     r8 = r8.add(2);
 
-    return format.replace(/(%\S)/g, (token: string, ...args: any[]) => {
+    return format.replace(/(%(ld|[-\w@%]))/g, (token: string, ...args: any[]) => {
         if (state === "bad") {
             return token;
         }
@@ -271,6 +271,16 @@ function expandOslogFormatStringX64(format: string, context: X64CpuContext): str
             case "%d": {
                 value = r8.readS32().toString();
                 size = 4;
+                break;
+            }
+            case "%ld": {
+                value = r8.readS64().toString();
+                size = 8;
+                break;
+            }
+            case "%f": {
+                value = r8.readDouble().toString();
+                size = 8;
                 break;
             }
             case "%s": {
@@ -321,7 +331,7 @@ function expandOslogFormatStringArm64(format: string, context: Arm64CpuContext):
     let { sp } = context;
     sp = sp.add(2);
 
-    return format.replace(/(%\S)/g, (token: string, ...args: any[]) => {
+    return format.replace(/(%(ld|[-\w@%]))/g, (token: string, ...args: any[]) => {
         if (state === "bad") {
             return token;
         }
@@ -335,6 +345,16 @@ function expandOslogFormatStringArm64(format: string, context: Arm64CpuContext):
             case "%d": {
                 value = sp.readS32().toString();
                 size = 4;
+                break;
+            }
+            case "%ld": {
+                value = sp.readS64().toString();
+                size = 8;
+                break;
+            }
+            case "%f": {
+                value = sp.readDouble().toString();
+                size = 8;
                 break;
             }
             case "%s": {
