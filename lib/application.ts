@@ -57,6 +57,8 @@ export class Application {
 
             await this.instrument(process.pid, process.name);
 
+            this.delegate.onReady();
+
             await this.done;
         } finally {
             this.dispose();
@@ -124,6 +126,7 @@ export class Application {
 export interface IDelegate {
     onProgress(operation: IOperation): void;
     onConsoleMessage(scope: string, level: frida.LogLevel, text: string): void;
+    onReady(): void;
     onEvent(event: AgentEvent, data: Buffer | null): void;
     onError(error: Error): void;
 }

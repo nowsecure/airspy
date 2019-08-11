@@ -3,6 +3,7 @@ import { parseNSData } from "./foundation";
 import {
     IAgent,
     ICoverageEvent,
+    ILogEvent,
     IRequestBodyEvent,
     IRequestDeallocatedEvent,
     IRequestHeadEvent,
@@ -12,17 +13,42 @@ import {
 
 const { pointerSize } = Process;
 const {
+    NSAutoreleasePool,
     SDAirDropConnection,
 } = ObjC.classes;
 
+const TRUE = ptr(1);
+
+const oslogFormatStringExpanders: { [name: string]: (format: string, cpuContext: any) => string } = {
+    "x64": expandOslogFormatStringX64,
+    "arm64": expandOslogFormatStringArm64,
+};
+const expandOslogFormatString = oslogFormatStringExpanders[Process.arch] || expandOslogFormatStringFallback;
+
 class Agent implements IAgent {
+    private startTime: number = Date.now();
+
     private requests: Map<string, RequestId> = new Map<string, RequestId>();
     private nextRequestId: number = 1;
 
     private requestDestructorListener: InvocationListener | null = null;
 
+    private airdropLog: ObjC.Object | null = null;
+
     public async init(): Promise<void> {
         this.hookConnection();
+        this.hookLogging();
+    }
+
+    public async dispose(): Promise<void> {
+        if (this.airdropLog !== null) {
+            this.airdropLog.release();
+            this.airdropLog = null;
+        }
+    }
+
+    private timeNow(): number {
+        return Date.now() - this.startTime;
     }
 
     private hookConnection(): void {
@@ -36,6 +62,7 @@ class Agent implements IAgent {
                 const { method, path, headers } = request;
                 const event: IRequestHeadEvent = {
                     type: "request-head",
+                    timestamp: self.timeNow(),
                     id,
                     method,
                     path,
@@ -58,9 +85,12 @@ class Agent implements IAgent {
 
                 const id = self.getRequestId(request);
                 this.id = id;
+                const timestamp = self.timeNow();
+                this.timestamp = timestamp;
                 const body: ObjC.Object | null = ivars._requestData;
                 const event: IRequestBodyEvent = {
                     type: "request-body",
+                    timestamp,
                     id,
                 };
                 send(event, parseNSData(body));
@@ -81,6 +111,7 @@ class Agent implements IAgent {
                 Stalker.flush();
 
                 const id: RequestId = this.id;
+                const timestamp: number = this.timestamp;
                 const coverage: ArrayBuffer[] = this.coverage;
                 setTimeout(() => {
                     self.emitCoverageReport(id, coverage);
@@ -97,6 +128,7 @@ class Agent implements IAgent {
                 const { responseStatusLine, headers, body } = response.message;
                 const event: IResponseEvent = {
                     type: "response",
+                    timestamp: self.timeNow(),
                     id,
                     responseStatusLine,
                     headers,
@@ -140,6 +172,7 @@ class Agent implements IAgent {
 
         const event: IRequestDeallocatedEvent = {
             type: "request-deallocated",
+            timestamp: this.timeNow(),
             id: id,
         };
         send(event);
@@ -172,16 +205,187 @@ class Agent implements IAgent {
 
         const event: ICoverageEvent = {
             type: "coverage",
+            timestamp: this.timeNow(),
             id,
             modules,
             symbols,
         };
         send(event);
     }
+
+    private hookLogging(): void {
+        const self = this;
+
+        const getAirdropLogHandle = new NativeFunction(Module.getExportByName(null, "airdrop_log"), "pointer", []) as any;
+
+        const pool = NSAutoreleasePool.alloc().init();
+        const airdropLog = new ObjC.Object(getAirdropLogHandle()).retain();
+        this.airdropLog = airdropLog;
+        pool.release();
+
+        Interceptor.attach(Module.getExportByName(null, "os_log_type_enabled"), {
+            onEnter(args) {
+                this.log = args[0];
+            },
+            onLeave(retval) {
+                if (this.log.equals(airdropLog)) {
+                    retval.replace(TRUE);
+                }
+            }
+        });
+
+        Interceptor.attach(Module.getExportByName(null, "_os_log_impl"), {
+            onEnter(args) {
+                const log = args[1];
+                if (log.equals(airdropLog)) {
+                    const message = expandOslogFormatString(args[3].readUtf8String() as string, this.context);
+                    const event: ILogEvent = {
+                        type: "log",
+                        timestamp: self.timeNow(),
+                        message,
+                    };
+                    send(event);
+                }
+            }
+        });
+    }
+}
+
+function expandOslogFormatStringX64(format: string, context: X64CpuContext): string {
+    let state: "good" | "bad" = "good";
+
+    let { r8 } = context;
+    r8 = r8.add(2);
+
+    return format.replace(/(%\S)/g, (token: string, ...args: any[]) => {
+        if (state === "bad") {
+            return token;
+        }
+
+        r8 = r8.add(2);
+
+        let value: string = token;
+        let size = 0;
+
+        switch (token) {
+            case "%d": {
+                value = r8.readS32().toString();
+                size = 4;
+                break;
+            }
+            case "%s": {
+                const p = r8.readPointer();
+                if (!p.isNull()) {
+                    value = p.readUtf8String() as string;
+                } else {
+                    value = "(null)";
+                }
+                size = pointerSize;
+                break;
+            }
+            case "%p": {
+                const p = r8.readPointer();
+                value = p.toString();
+                size = pointerSize;
+                break;
+            }
+            case "%@": {
+                const p = r8.readPointer();
+                if (!p.isNull()) {
+                    const obj = new ObjC.Object(p);
+                    value = obj.toString();
+                } else {
+                    value = "(nil)";
+                }
+                size = pointerSize;
+                break;
+            }
+            case "%%":
+                return token;
+            default:
+        }
+
+        if (size !== 0) {
+            r8 = r8.add(pointerSize);
+        } else {
+            state = "bad";
+        }
+
+        return value;
+    });
+}
+
+function expandOslogFormatStringArm64(format: string, context: Arm64CpuContext): string {
+    let state: "good" | "bad" = "good";
+
+    let { sp } = context;
+    sp = sp.add(2);
+
+    return format.replace(/(%\S)/g, (token: string, ...args: any[]) => {
+        if (state === "bad") {
+            return token;
+        }
+
+        sp = sp.add(2);
+
+        let value: string = token;
+        let size = 0;
+
+        switch (token) {
+            case "%d": {
+                value = sp.readS32().toString();
+                size = 4;
+                break;
+            }
+            case "%s": {
+                const p = sp.readPointer();
+                if (!p.isNull()) {
+                    value = p.readUtf8String() as string;
+                } else {
+                    value = "(null)";
+                }
+                size = pointerSize;
+                break;
+            }
+            case "%p": {
+                const p = sp.readPointer();
+                value = p.toString();
+                size = pointerSize;
+                break;
+            }
+            case "%@": {
+                const p = sp.readPointer();
+                if (!p.isNull()) {
+                    const obj = new ObjC.Object(p);
+                    value = obj.toString();
+                } else {
+                    value = "(nil)";
+                }
+                size = pointerSize;
+                break;
+            }
+            case "%%":
+                return token;
+            default:
+        }
+
+        if (size !== 0) {
+            sp = sp.add(pointerSize);
+        } else {
+            state = "bad";
+        }
+
+        return value;
+    });
+}
+
+function expandOslogFormatStringFallback(format: string, context: PortableCpuContext): string {
+    return format;
 }
 
 const agent = new Agent();
 const exportedApi: IAgent = {
     init: Agent.prototype.init.bind(agent),
+    dispose: Agent.prototype.dispose.bind(agent),
 };
 rpc.exports = exportedApi as any;

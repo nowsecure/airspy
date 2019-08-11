@@ -4,6 +4,7 @@ import {
     IConfig,
     ICoverageEvent,
     IDelegate,
+    ILogEvent,
     IOperation,
     IRequestBodyEvent,
     IRequestDeallocatedEvent,
@@ -28,9 +29,9 @@ import { promisify } from "util";
 const access = promisify(fs.access);
 const mkdir = promisify(fs.mkdir);
 
-const inboundPrefix = chalk.gray("<<<  ");
-const outboundPrefix = chalk.gray(">>>  ");
-const eventPrefix = chalk.gray("***  ");
+const inboundPrefix = chalk.gray("<<< ");
+const outboundPrefix = chalk.gray(">>> ");
+const eventPrefix = chalk.gray("*** ");
 
 async function main(): Promise<void> {
     const ui = new ConsoleUI();
@@ -136,12 +137,13 @@ class ConsoleUI implements IDelegate {
     private pendingOperation: IPendingOperation | null = null;
 
     private requests: Map<RequestId, string> = new Map<RequestId, string>();
+    private lastEventSeenAt: number | null = null;
 
     private getOutputDirPromise: Promise<string> | null = null;
     private getEventOutputStreamPromise: Promise<Writable> | null = null;
 
     public onProgress(operation: IOperation): void {
-        process.stdout.write(`[${operation.scope}] ${chalk.cyan(operation.description)} `);
+        process.stdout.write(`${eventPrefix}[${operation.scope}] ${chalk.cyan(operation.description)} `);
 
         const pending = {
             operation: operation,
@@ -151,7 +153,7 @@ class ConsoleUI implements IDelegate {
 
         operation.onceComplete(() => {
             if (pending.logMessageCount > 0) {
-                process.stdout.write(`[${operation.scope}] ${chalk.cyan(`${operation.description} completed`)} `);
+                process.stdout.write(`${eventPrefix}[${operation.scope}] ${chalk.cyan(`${operation.description} completed`)} `);
             }
 
             process.stdout.write(chalk.gray(`(${prettyHrtime(operation.elapsed)})\n`));
@@ -185,7 +187,11 @@ class ConsoleUI implements IDelegate {
             pending.logMessageCount += 1;
         }
 
-        process.stdout.write(`[${scope}] ${c(text)}\n`);
+        process.stdout.write(`${eventPrefix}[${scope}] ${c(text)}\n`);
+    }
+
+    public onReady(): void {
+        process.stdout.write(`${eventPrefix}${chalk.greenBright("Agent ready!")} Go ahead and generate some traffic 🚀\n`);
     }
 
     public onEvent(event: AgentEvent, data: Buffer | null): void {
@@ -209,9 +215,14 @@ class ConsoleUI implements IDelegate {
             case "coverage":
                 this.onCoverage(event);
                 break;
+            case "log":
+                this.onLog(event);
+                break;
             default:
                 console.error("Unhandled event:", event);
         }
+
+        this.lastEventSeenAt = event.timestamp;
     }
 
     public onError(error: Error): void {
@@ -220,12 +231,12 @@ class ConsoleUI implements IDelegate {
     }
 
     private onRequestHead(event: IRequestHeadEvent): void {
-        const { id, method, path, headers } = event;
+        const { id, timestamp, method, path, headers } = event;
 
         const description = method.toLowerCase().replace(/[^\w]/g, "-") + path.toLowerCase().replace(/[^\w]/g, "-");
         this.requests.set(id, description);
 
-        this.printLines(inboundPrefix,
+        this.printLines(inboundPrefix, timestamp,
             [
                 chalk.cyan(`[ID: ${id}] ${method} ${path}`),
             ]
@@ -246,9 +257,11 @@ class ConsoleUI implements IDelegate {
     }
 
     private onRequestBody(event: IRequestBodyEvent, data: Buffer): void {
-        this.printLines(inboundPrefix,
+        const { id, timestamp } = event;
+
+        this.printLines(inboundPrefix, timestamp,
             [
-                chalk.cyan(`[ID: ${event.id}]`),
+                chalk.cyan(`[ID: ${id}]`),
             ]
             .concat(hexdump(data, { header: false, ansi: true }).split("\n"))
             .concat([ "=>" ])
@@ -261,11 +274,13 @@ class ConsoleUI implements IDelegate {
     }
 
     private onRequestDeallocated(event: IRequestDeallocatedEvent): void {
-        this.printLines(eventPrefix, [ chalk.yellowBright(`[ID: ${event.id}] Deallocated`) ]);
+        const { id, timestamp } = event;
+
+        this.printLines(eventPrefix, timestamp, [ chalk.yellowBright(`[ID: ${event.id}] Deallocated`) ]);
     }
 
     private onResponse(event: IResponseEvent, data: Buffer | null): void {
-        const { id, responseStatusLine, headers } = event;
+        const { id, timestamp, responseStatusLine, headers } = event;
 
         let lines = [
                 chalk.cyan(`[ID: ${id}] ${responseStatusLine}`),
@@ -276,7 +291,7 @@ class ConsoleUI implements IDelegate {
                 .concat([ "=>" ])
                 .concat(this.parseBody(data).split("\n"));
         }
-        this.printLines(outboundPrefix, lines);
+        this.printLines(outboundPrefix, timestamp, lines);
 
         this.withNewlyCreatedFileFor(event, "-head.txt", stream => {
             stream.write(
@@ -307,15 +322,32 @@ class ConsoleUI implements IDelegate {
         });
     }
 
+    private onLog(event: ILogEvent): void {
+        const { timestamp, message } = event;
+
+        this.printLines(eventPrefix, timestamp, [ `${chalk.magentaBright("[LOG]")} ${message}` ]);
+    }
+
     private parseBody(body: Buffer): string {
         const [ root ] = bplist.parseBuffer(body);
 
         return plist.build(root);
     }
 
-    private printLines(prefix: string, lines: string[]): void {
-        const message = `${prefix}${lines.join(`\n${prefix}`)}\n`;
-        process.stdout.write(message);
+    private printLines(prefix: string, timestamp: number, lines: string[]): void {
+        const [ first, ...rest ] = lines;
+
+        let timeSuffix = "";
+        const timeDelta = timestamp - ((this.lastEventSeenAt !== null) ? this.lastEventSeenAt : timestamp);
+        if (timeDelta >= 10) {
+            const prettyDelta = prettyHrtime([ Math.trunc(timeDelta / 1000), (timeDelta % 1000) * 1000000 ]);
+            timeSuffix = (prettyDelta.length > 0) ? chalk.gray(` (at T +${prettyDelta})`) : "";
+        }
+        process.stdout.write(`${prefix}${first}${timeSuffix}\n`);
+
+        if (rest.length > 0) {
+            process.stdout.write(`${prefix}${rest.join(`\n${prefix}`)}\n`);
+        }
     }
 
     private async logEvent(event: AgentEvent, data: Buffer | null): Promise<void> {
@@ -385,17 +417,20 @@ class ConsoleUI implements IDelegate {
         return this.getEventOutputStreamPromise;
     }
 
-    private async withNewlyCreatedFileFor(event: AgentEvent, suffix: string, write: (stream: Writable) => void): Promise<void> {
-        const id = event.id.toString().padStart(3, "0");
+    private async withNewlyCreatedFileFor(event: IRequestHeadEvent | IRequestBodyEvent | IResponseEvent | ICoverageEvent,
+            suffix: string, write: (stream: Writable) => void): Promise<void> {
+        const { id, timestamp, type } = event;
 
-        let requestDescription = this.requests.get(event.id);
+        const prettyId = id.toString().padStart(3, "0");
+
+        let requestDescription = this.requests.get(id);
         if (requestDescription === undefined) {
             requestDescription = "unknown";
         }
-        const eventDescription = event.type.replace(/[^\w]/g, "-");
+        const eventDescription = type.replace(/[^\w]/g, "-");
         const description = `${requestDescription}-${eventDescription}`;
 
-        const path = await this.getOutputPath(`${id}-${description}${suffix}`);
+        const path = await this.getOutputPath(`${prettyId}-${description}${suffix}`);
 
         // tslint:disable-next-line:non-literal-fs-path
         const stream = fs.createWriteStream(path, "utf-8");
@@ -407,7 +442,7 @@ class ConsoleUI implements IDelegate {
 
         stream.once("finish", () => {
             const relPath = fsPath.relative(process.cwd(), path);
-            this.printLines(eventPrefix, [ chalk.greenBright(`[ID: ${event.id}] Wrote ${relPath}`) ]);
+            this.printLines(eventPrefix, timestamp, [ chalk.greenBright(`[ID: ${id}] Wrote ${relPath}`) ]);
         });
     }
 }
