@@ -5,9 +5,9 @@ export interface IAgent {
 export type AgentEvent =
     | IRequestHeadEvent
     | IRequestBodyEvent
-    | IRequestCoverageEvent
     | IRequestDeallocatedEvent
     | IResponseEvent
+    | ICoverageEvent
     ;
 
 export type RequestId = number;
@@ -25,13 +25,6 @@ export interface IRequestBodyEvent {
     id: RequestId;
 }
 
-export interface IRequestCoverageEvent {
-    type: "request-coverage";
-    id: RequestId;
-    modules: string[];
-    symbols: string[];
-}
-
 export interface IRequestDeallocatedEvent {
     type: "request-deallocated";
     id: RequestId;
@@ -42,6 +35,13 @@ export interface IResponseEvent {
     id: RequestId;
     responseStatusLine: string;
     headers: IHTTPHeader[];
+}
+
+export interface ICoverageEvent {
+    type: "coverage";
+    id: RequestId;
+    modules: string[];
+    symbols: string[];
 }
 
 export interface IHTTPHeader {

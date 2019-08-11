@@ -2,8 +2,8 @@ import { HTTPServerRequest, HTTPServerResponse } from "./cfnetwork";
 import { parseNSData } from "./foundation";
 import {
     IAgent,
+    ICoverageEvent,
     IRequestBodyEvent,
-    IRequestCoverageEvent,
     IRequestDeallocatedEvent,
     IRequestHeadEvent,
     IResponseEvent,
@@ -170,8 +170,8 @@ class Agent implements IAgent {
             });
         });
 
-        const event: IRequestCoverageEvent = {
-            type: "request-coverage",
+        const event: ICoverageEvent = {
+            type: "coverage",
             id,
             modules,
             symbols,

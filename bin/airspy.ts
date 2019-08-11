@@ -2,10 +2,10 @@ import {
     AgentEvent,
     Application,
     IConfig,
+    ICoverageEvent,
     IDelegate,
     IOperation,
     IRequestBodyEvent,
-    IRequestCoverageEvent,
     IRequestDeallocatedEvent,
     IRequestHeadEvent,
     IResponseEvent,
@@ -200,14 +200,14 @@ class ConsoleUI implements IDelegate {
             case "request-body":
                 this.onRequestBody(event, data as Buffer);
                 break;
-            case "request-coverage":
-                this.onRequestCoverage(event);
-                break;
             case "request-deallocated":
                 this.onRequestDeallocated(event);
                 break;
             case "response":
                 this.onResponse(event, data);
+                break;
+            case "coverage":
+                this.onCoverage(event);
                 break;
             default:
                 console.error("Unhandled event:", event);
@@ -260,17 +260,6 @@ class ConsoleUI implements IDelegate {
         });
     }
 
-    private onRequestCoverage(event: IRequestCoverageEvent): void {
-        this.withNewlyCreatedFileFor(event, "-modules.log", stream => {
-            stream.write(event.modules.join("\n"));
-            stream.write("\n");
-        });
-        this.withNewlyCreatedFileFor(event, "-symbols.log", stream => {
-            stream.write(event.symbols.join("\n"));
-            stream.write("\n");
-        });
-    }
-
     private onRequestDeallocated(event: IRequestDeallocatedEvent): void {
         this.printLines(eventPrefix, [ chalk.yellowBright(`[ID: ${event.id}] Deallocated`) ]);
     }
@@ -305,6 +294,17 @@ class ConsoleUI implements IDelegate {
                 stream.write(data);
             });
         }
+    }
+
+    private onCoverage(event: ICoverageEvent): void {
+        this.withNewlyCreatedFileFor(event, "-modules.log", stream => {
+            stream.write(event.modules.join("\n"));
+            stream.write("\n");
+        });
+        this.withNewlyCreatedFileFor(event, "-symbols.log", stream => {
+            stream.write(event.symbols.join("\n"));
+            stream.write("\n");
+        });
     }
 
     private parseBody(body: Buffer): string {
