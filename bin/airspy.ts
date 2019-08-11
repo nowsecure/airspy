@@ -29,6 +29,7 @@ const mkdir = promisify(fs.mkdir);
 
 const inboundPrefix = chalk.gray("<<<  ");
 const outboundPrefix = chalk.gray(">>>  ");
+const eventPrefix = chalk.gray("***  ");
 
 async function main(): Promise<void> {
     const ui = new ConsoleUI();
@@ -107,6 +108,7 @@ async function record(config: IConfig, ui: ConsoleUI): Promise<void> {
 
 function replay(path: string, ui: ConsoleUI): void {
     ui.mode = ConsoleUIMode.Replay;
+    ui.outputPath = fsPath.dirname(path);
 
     // tslint:disable-next-line:non-literal-fs-path
     const stream = fs.createReadStream(path, "utf-8").pipe(split());
@@ -128,6 +130,7 @@ function replay(path: string, ui: ConsoleUI): void {
 
 class ConsoleUI implements IDelegate {
     public mode: ConsoleUIMode = ConsoleUIMode.Record;
+    public outputPath: string | null = null;
 
     private pendingOperation: IPendingOperation | null = null;
 
@@ -222,6 +225,17 @@ class ConsoleUI implements IDelegate {
             ]
             .concat(headers.map(({ name, value }) => `${chalk.green(name)}: ${value}`))
         );
+
+        this.withNewlyCreatedFileFor(event, ".txt", stream => {
+            stream.write(
+                [
+                    `${method} ${path}`,
+                ]
+                .concat(headers.map(({ name, value }) => `${name}: ${value}`))
+                .join("\n"),
+                "utf-8"
+            );
+        });
     }
 
     private onRequestBody(event: IRequestBodyEvent, data: Buffer): void {
@@ -233,12 +247,23 @@ class ConsoleUI implements IDelegate {
             .concat([ "=>" ])
             .concat(this.parseBody(data).split("\n"))
         );
+
+        this.withNewlyCreatedFileFor(event, ".plist", stream => {
+            stream.write(data);
+        });
     }
 
     private onRequestCoverage(event: IRequestCoverageEvent): void {
+        this.withNewlyCreatedFileFor(event, "-modules.log", stream => {
+            stream.write(event.modules.join("\n"));
+        });
+        this.withNewlyCreatedFileFor(event, "-symbols.log", stream => {
+            stream.write(event.symbols.join("\n"));
+        });
     }
 
     private onRequestDeallocated(event: IRequestDeallocatedEvent): void {
+        this.printLines(eventPrefix, [ chalk.yellowBright(`[ID: ${event.id}] Deallocated`) ]);
     }
 
     private onResponse(event: IResponseEvent, data: Buffer | null): void {
@@ -253,8 +278,23 @@ class ConsoleUI implements IDelegate {
                 .concat([ "=>" ])
                 .concat(this.parseBody(data).split("\n"));
         }
-
         this.printLines(outboundPrefix, lines);
+
+        this.withNewlyCreatedFileFor(event, ".txt", stream => {
+            stream.write(
+                [
+                    responseStatusLine,
+                ]
+                .concat(headers.map(({ name, value }) => `${name}: ${value}`))
+                .join("\n"),
+                "utf-8"
+            );
+        });
+        if (data !== null) {
+            this.withNewlyCreatedFileFor(event, ".plist", stream => {
+                stream.write(data);
+            });
+        }
     }
 
     private parseBody(body: Buffer): string {
@@ -264,8 +304,8 @@ class ConsoleUI implements IDelegate {
     }
 
     private printLines(prefix: string, lines: string[]): void {
-        const message = [""].concat(lines).join(`\n${prefix}`);
-        process.stdout.write(`${message}\n`);
+        const message = `${prefix}${lines.join(`\n${prefix}`)}\n`;
+        process.stdout.write(message);
     }
 
     private async logEvent(event: AgentEvent, data: Buffer | null): Promise<void> {
@@ -284,6 +324,10 @@ class ConsoleUI implements IDelegate {
     private getOutputDir(): Promise<string> {
         if (this.getOutputDirPromise === null) {
             this.getOutputDirPromise = (async (): Promise<string> => {
+                if (this.outputPath !== null) {
+                    return this.outputPath;
+                }
+
                 const rootDir = fsPath.resolve(__dirname, "..", "..", "out");
 
                 let outDir: string;
@@ -329,6 +373,26 @@ class ConsoleUI implements IDelegate {
         }
 
         return this.getEventOutputStreamPromise;
+    }
+
+    private async withNewlyCreatedFileFor(event: AgentEvent, suffix: string, write: (stream: Writable) => void): Promise<void> {
+        const id = event.id.toString().padStart(3, "0");
+        const description = event.type.replace(/[^\w]/g, "-");
+
+        const path = await this.getOutputPath(`${id}-${description}${suffix}`);
+
+        // tslint:disable-next-line:non-literal-fs-path
+        const stream = fs.createWriteStream(path, "utf-8");
+        try {
+            write(stream);
+        } finally {
+            stream.end();
+        }
+
+        stream.once("finish", () => {
+            const relPath = fsPath.relative(process.cwd(), path);
+            this.printLines(eventPrefix, [ chalk.greenBright(`[ID: ${event.id}] Wrote ${relPath}`) ]);
+        });
     }
 }
 
