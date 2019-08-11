@@ -15,11 +15,12 @@ import {
 
 import * as bplist from "bplist-parser";
 import chalk, { Chalk } from "chalk";
-import * as program from "commander";
+import commander from "commander";
 import * as fs from "fs";
 import * as fsPath from "path";
 import * as plist from "plist";
-import * as prettyHrtime from "pretty-hrtime";
+import prettyHrtime from "pretty-hrtime";
+import split from "split";
 import { Writable } from "stream";
 import { promisify } from "util";
 
@@ -30,35 +31,29 @@ const inboundPrefix = chalk.gray("<<<  ");
 const outboundPrefix = chalk.gray(">>>  ");
 
 async function main(): Promise<void> {
+    const ui = new ConsoleUI();
+
     try {
-        const config = parseArguments();
-        const ui = new ConsoleUI();
+        const [ config, replayPath ] = parseArguments();
 
-        let app: Application | null = new Application(config, ui);
-
-        process.on("SIGINT", stop);
-        process.on("SIGTERM", stop);
-
-        await app.run();
-
-        function stop(): void {
-            if (app !== null) {
-                app.dispose();
-                app = null;
-            }
+        if (config !== null) {
+            await record(config, ui);
         }
-    } catch (error) {
-        process.exitCode = 1;
-        process.stderr.write(`${chalk.redBright(error.message)}\n`);
+
+        if (replayPath !== null) {
+            replay(replayPath, ui);
+        }
+    } catch (e) {
+        ui.onError(e);
     }
 }
 
-function parseArguments(): IConfig {
+function parseArguments(): [ IConfig | null, string | null ] {
     let targetDevice: TargetDevice = {
         kind: "local"
     };
 
-    program
+    commander
         .option("-U, --usb", "Connect to USB device", () => {
             targetDevice = {
                 kind: "usb"
@@ -69,20 +64,71 @@ function parseArguments(): IConfig {
                 kind: "remote"
             };
         })
-        .option("-D, --device [ID]", "Connect to device with the given ID", (id: string) => {
+        .option("-D, --device [id]", "Connect to device with the given ID", (id: string) => {
             targetDevice = {
                 kind: "by-id",
                 id: id
             };
         })
+        .option("-r, --replay [events.log]", "Replay events.log from a previous run")
         .parse(process.argv);
 
-    return {
+    if (commander.args.length > 0) {
+        throw new Error(`Unsupported arguments: ${commander.args.join(" ")}`);
+    }
+
+    const replayPath = commander.replay;
+    if (replayPath !== undefined) {
+        return [ null, replayPath ];
+    }
+
+    return [ {
         targetDevice,
-    };
+    }, null ];
+}
+
+async function record(config: IConfig, ui: ConsoleUI): Promise<void> {
+    ui.mode = ConsoleUIMode.Record;
+
+    let app: Application | null = new Application(config, ui);
+
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+
+    await app.run();
+
+    function stop(): void {
+        if (app !== null) {
+            app.dispose();
+            app = null;
+        }
+    }
+}
+
+function replay(path: string, ui: ConsoleUI): void {
+    ui.mode = ConsoleUIMode.Replay;
+
+    // tslint:disable-next-line:non-literal-fs-path
+    const stream = fs.createReadStream(path, "utf-8").pipe(split());
+
+    stream.on("data", line => {
+        if (line.length === 0) {
+            return;
+        }
+
+        const [ event, encodedData ] = JSON.parse(line);
+        const data = (encodedData !== null) ? Buffer.from(encodedData, "base64") : null;
+        ui.onEvent(event, data);
+    });
+
+    stream.on("error", error => {
+        ui.onError(error);
+    });
 }
 
 class ConsoleUI implements IDelegate {
+    public mode: ConsoleUIMode = ConsoleUIMode.Record;
+
     private pendingOperation: IPendingOperation | null = null;
 
     private getOutputDirPromise: Promise<string> | null = null;
@@ -137,7 +183,9 @@ class ConsoleUI implements IDelegate {
     }
 
     public onEvent(event: AgentEvent, data: Buffer | null): void {
-        this.logEvent(event, data);
+        if (this.mode === ConsoleUIMode.Record) {
+            this.logEvent(event, data);
+        }
 
         switch (event.type) {
             case "request-head":
@@ -158,6 +206,11 @@ class ConsoleUI implements IDelegate {
             default:
                 console.error("Unhandled event:", event);
         }
+    }
+
+    public onError(error: Error): void {
+        process.exitCode = 1;
+        process.stderr.write(`${chalk.redBright(error.stack || error.message)}\n`);
     }
 
     private onRequestHead(event: IRequestHeadEvent): void {
@@ -271,12 +324,17 @@ class ConsoleUI implements IDelegate {
                 const logPath = await this.getOutputPath("events.log");
 
                 // tslint:disable-next-line:non-literal-fs-path
-                return fs.createWriteStream(logPath, "utf8");
+                return fs.createWriteStream(logPath, "utf-8");
             })();
         }
 
         return this.getEventOutputStreamPromise;
     }
+}
+
+enum ConsoleUIMode {
+    Record,
+    Replay
 }
 
 interface IPendingOperation {

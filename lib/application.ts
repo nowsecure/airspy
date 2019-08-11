@@ -125,6 +125,7 @@ export interface IDelegate {
     onProgress(operation: IOperation): void;
     onConsoleMessage(scope: string, level: frida.LogLevel, text: string): void;
     onEvent(event: AgentEvent, data: Buffer | null): void;
+    onError(error: Error): void;
 }
 
 class Agent {
@@ -225,7 +226,9 @@ class Agent {
                 this.delegate.onEvent(message.payload, data);
                 break;
             case frida.MessageType.Error:
-                console.error(`[PID=${this.pid}]:`, message.stack);
+                const e = new Error(message.description);
+                e.stack = message.stack;
+                this.delegate.onError(e);
                 break;
             default:
         }

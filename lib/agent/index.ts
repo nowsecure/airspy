@@ -103,7 +103,7 @@ class Agent implements IAgent {
                 };
                 send(event, parseNSData(body));
             }
-        });        
+        });
     }
 
     private getRequestId(request: HTTPServerRequest): RequestId {
@@ -156,13 +156,13 @@ class Agent implements IAgent {
             const events = Stalker.parse(rawEvents, { annotate: false }) as StalkerCompileEventBare[];
             events.forEach(ev => {
                 const blockStart = ev[0] as NativePointer;
-    
+
                 const modulePath = allModules.findPath(blockStart);
                 if (modulePath !== null && !seenModules.has(modulePath)) {
                     modules.push(modulePath);
                     seenModules.add(modulePath);
                 }
-    
+
                 const symbol = DebugSymbol.fromAddress(blockStart);
                 if (symbol.moduleName !== null) {
                     symbols.push(symbol.toString());
