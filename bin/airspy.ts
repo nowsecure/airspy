@@ -283,7 +283,7 @@ class ConsoleUI implements IDelegate {
         }
         this.printLines(outboundPrefix, lines);
 
-        this.withNewlyCreatedFileFor(event, ".txt", stream => {
+        this.withNewlyCreatedFileFor(event, "-head.txt", stream => {
             stream.write(
                 [
                     responseStatusLine,
@@ -295,7 +295,7 @@ class ConsoleUI implements IDelegate {
             );
         });
         if (data !== null) {
-            this.withNewlyCreatedFileFor(event, ".plist", stream => {
+            this.withNewlyCreatedFileFor(event, "-body.plist", stream => {
                 stream.write(data);
             });
         }
