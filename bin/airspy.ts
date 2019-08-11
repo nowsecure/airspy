@@ -232,6 +232,7 @@ class ConsoleUI implements IDelegate {
                     `${method} ${path}`,
                 ]
                 .concat(headers.map(({ name, value }) => `${name}: ${value}`))
+                .concat([ "" ])
                 .join("\n"),
                 "utf-8"
             );
@@ -256,9 +257,11 @@ class ConsoleUI implements IDelegate {
     private onRequestCoverage(event: IRequestCoverageEvent): void {
         this.withNewlyCreatedFileFor(event, "-modules.log", stream => {
             stream.write(event.modules.join("\n"));
+            stream.write("\n");
         });
         this.withNewlyCreatedFileFor(event, "-symbols.log", stream => {
             stream.write(event.symbols.join("\n"));
+            stream.write("\n");
         });
     }
 
@@ -286,6 +289,7 @@ class ConsoleUI implements IDelegate {
                     responseStatusLine,
                 ]
                 .concat(headers.map(({ name, value }) => `${name}: ${value}`))
+                .concat([ "" ])
                 .join("\n"),
                 "utf-8"
             );
