@@ -10,7 +10,7 @@
     "build:watch": "frida-compile index.ts -o ../../dist/lib/agent.js -w"
   },
   "devDependencies": {
-    "@types/frida-gum": "^13.1.0",
+    "@types/frida-gum": "^14.0.0",
     "@types/node": "^12.7.1",
     "frida-compile": "^9.0.5"
   }

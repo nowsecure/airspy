@@ -31,7 +31,7 @@
     "@types/plist": "^3.0.2",
     "@types/pretty-hrtime": "^1.0.0",
     "prettier": "^1.18.2",
-    "rimraf": "^2.6.3",
+    "rimraf": "^3.0.0",
     "tslint": "^5.18.0",
     "tslint-config-prettier": "^1.18.0",
     "tslint-microsoft-contrib": "^6.2.0",
